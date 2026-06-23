@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# justdoit: justdoit11("Just") → (1秒後) → justdoit12("Do It") を同じ位置で差し替え表示。
+#   --loop : "Just"(1秒) → "Do It"(2秒) を繰り返す。各サイクル先頭で効果音を再生。
+
+# スクリプト自身の置かれたディレクトリ(画像もここに置く)
+# シンボリックリンク経由で実行されても実体のディレクトリを解決する
+src="$(readlink -f "${BASH_SOURCE[0]}")"
+dir="$(cd "$(dirname "$src")" && pwd)"
+
+img1="$dir/justdoit11.png"
+img2="$dir/justdoit12.png"
+audio="$dir/justdoit.mp3"
+
+# 引数: --loop でループ再生
+loop=0
+for arg in "$@"; do
+  case "$arg" in
+    --loop) loop=1 ;;
+  esac
+done
+
+# tmux ペイン(端末)のサイズ
+cols="$(tput cols 2>/dev/null || echo 80)"
+rows="$(tput lines 2>/dev/null || echo 40)"
+(( cols < 1 )) && cols=80
+
+# figletバナー(中央寄せ)。1枚目は "Just"、2枚目は "Do It"。
+mapfile -t banner1 < <(figlet -c "Just")
+mapfile -t banner2 < <(figlet -c "Do It")
+fh=${#banner1[@]}
+(( ${#banner2[@]} > fh )) && fh=${#banner2[@]}
+
+# 横幅をペイン幅に合わせ、縦横比を維持してASCII化
+mapfile -t art1 < <(jp2a --width="$cols" "$img1")
+mapfile -t art2 < <(jp2a --width="$cols" "$img2")
+
+# 画像領域の高さ = 2枚のうち高い方。ただしバナー込みで画面に収める
+h=${#art1[@]}
+(( ${#art2[@]} > h )) && h=${#art2[@]}
+maxh=$(( rows - fh - 1 ))
+(( maxh < 1 )) && maxh=1
+# 収まらなければ高さ基準で再フィット
+if (( h > maxh )); then
+  mapfile -t art1 < <(jp2a --height="$maxh" "$img1")
+  mapfile -t art2 < <(jp2a --height="$maxh" "$img2")
+  h=${#art1[@]}
+  (( ${#art2[@]} > h )) && h=${#art2[@]}
+fi
+
+# 1フレーム描画(画像h行 + バナーfh行)。各行は行頭からクリアして上書き。
+draw() {
+  local -n art=$1 ban=$2
+  local i
+  for ((i = 0; i < h;  i++)); do printf '\033[2K%s\n' "${art[i]}"; done
+  for ((i = 0; i < fh; i++)); do printf '\033[2K%s\n' "${ban[i]}"; done
+}
+
+# フレーム先頭(画像の左上)へカーソルを戻す
+to_top() { printf '\033[%dA' "$(( h + fh ))"; }
+
+# 効果音を頭から再生(前回の再生は止めてから)
+audio_pid=""
+play_audio() {
+  command -v mpg123 >/dev/null 2>&1 && [[ -f "$audio" ]] || return
+  [[ -n "$audio_pid" ]] && kill "$audio_pid" 2>/dev/null
+  mpg123 -q "$audio" >/dev/null 2>&1 &
+  audio_pid=$!
+}
+
+# 後始末(Ctrl-C等): 音を止めてカーソルを復帰
+cleanup() {
+  [[ -n "$audio_pid" ]] && kill "$audio_pid" 2>/dev/null
+  tput cnorm 2>/dev/null
+  printf '\n'
+  exit 0
+}
+trap cleanup INT TERM
+
+(( loop )) && tput civis 2>/dev/null   # ループ中はカーソルを隠す
+
+first=1
+while :; do
+  # フレーム1: justdoit11 + "Just"(最初の画像と同時に効果音)
+  (( first )) || to_top
+  play_audio
+  draw art1 banner1
+  sleep 1
+
+  # フレーム2: justdoit12 + "Do It"
+  to_top
+  draw art2 banner2
+
+  (( loop )) || break
+  sleep 2
+  first=0
+done
+
+(( loop )) && tput cnorm 2>/dev/null
