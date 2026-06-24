@@ -48,7 +48,7 @@ sudo pacman -S jp2a figlet mpg123
 リポジトリを取得して実行権限を付与します。
 
 ```bash
-git clone https://github.com/<your-name>/justdoit.git
+git clone https://github.com/shurto11/justdoit.git
 cd justdoit
 chmod +x justdoit
 ```
